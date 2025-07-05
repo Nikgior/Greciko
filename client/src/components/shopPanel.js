@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Card, ListGroup, Button, Badge } from 'react-bootstrap';
 import { purchasableItems } from '../data/shopData.js';
 
@@ -21,8 +21,21 @@ const isTurn = (player,gameState)=>{
 }
 
 function ShopPanel({gameState, player, onPurchase }) {
+  const [highlightedItemId, setHighlightedItemId] = useState(null);
   // MODIFICA: Accedi alla sottocategoria 'Shop'
   const shopItems = Object.entries(purchasableItems.Shop);
+
+  const handlePurchaseClick = (itemId) => {
+    onPurchase(itemId);
+
+    // Attiva l'evidenziazione
+    setHighlightedItemId(itemId);
+
+    // Rimuovi l'evidenziazione dopo 750ms (durata dell'animazione)
+    setTimeout(() => {
+      setHighlightedItemId(null);
+    }, 750);
+  };
 
   return (
     <Card className="mt-4 shadow-sm">
@@ -31,7 +44,7 @@ function ShopPanel({gameState, player, onPurchase }) {
         {shopItems.map(([itemId, item]) => {
           const isAffordable = canAfford(player.resources, item.cost);
           return (
-            <ListGroup.Item key={itemId} className="p-3">
+            <ListGroup.Item key={itemId} className={`p-3 ${highlightedItemId === itemId ? 'item-purchased-highlight' : ''}`}>
               <div className="d-flex justify-content-between align-items-center">
                 <div className="d-flex align-items-center">
                   {item.image && (
@@ -58,7 +71,7 @@ function ShopPanel({gameState, player, onPurchase }) {
                 <Button 
                   variant={isAffordable ? "primary" : "outline-secondary"}
                   size="sm"
-                  onClick={() => onPurchase(itemId)}
+                  onClick={() => handlePurchaseClick(itemId)}
                   disabled={!isAffordable || !isTurn(player,gameState) || !isBelowLimit(player,itemId)}
                   className="ms-3"
                 >

@@ -1,7 +1,9 @@
 .main-content-area {
   padding-bottom: 300px;
 }
-
+.item-purchased-highlight {
+  animation: purchase-flash 0.25s ease-out;
+}
 /* Il contenitore che avvolge l'ActionPanel e lo fissa in basso */
 .action-panel-fixed {
   position: fixed;
@@ -17,4 +19,15 @@
   padding: 0.5rem 1rem;
   border-top: 1px solid #495057;
   box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.3);
+}
+
+@keyframes purchase-flash {
+  0% {
+    background-color: #d4edda; /* Verde chiaro per il successo */
+    transform: scale(1.01);
+  }
+  100% {
+    background-color: transparent; /* Torna al colore originale del componente */
+    transform: scale(1);
+  }
 }

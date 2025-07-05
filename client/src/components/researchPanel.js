@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Card, ListGroup, Button, Badge } from 'react-bootstrap';
 import { purchasableItems } from '../data/shopData.js';
 
@@ -25,6 +25,19 @@ const isTurn = (player,gameState)=>{
 
 function ResearchPanel({gameState, player, onResearch }) {
   const researchItems = Object.entries(purchasableItems.Research);
+  const [highlightedItemId, setHighlightedItemId] = useState(null);
+
+  const handleResearchClick = (itemId) => {
+    onResearch(itemId);
+
+    // Attiva l'evidenziazione
+    setHighlightedItemId(itemId);
+
+    // Rimuovi l'evidenziazione dopo 750ms
+    setTimeout(() => {
+      setHighlightedItemId(null);
+    }, 750);
+  };
 
   return (
     <Card bg="dark" text="light" className="mt-4 shadow">
@@ -37,7 +50,7 @@ function ResearchPanel({gameState, player, onResearch }) {
           const currentLevel = (player.powerUp && player.powerUp[itemId]) || 0;
 
           return (
-            <ListGroup.Item key={itemId} className="p-3 bg-dark text-light">
+            <ListGroup.Item key={itemId} className={`p-3 bg-dark text-light ${highlightedItemId === itemId ? 'item-purchased-highlight' : ''}`}>
               <div className="d-flex justify-content-between align-items-center">
                 <div className="d-flex align-items-center">
                   {item.image && (
@@ -66,7 +79,7 @@ function ResearchPanel({gameState, player, onResearch }) {
                     <Button 
                         variant="primary"
                         size="sm"
-                        onClick={() => onResearch(itemId)}
+                        onClick={() => handleResearchClick(itemId)}
                         // Il pulsante ora si disabilita correttamente
                         disabled={!isAffordable || !isTurn(player,gameState)}
                         className="ms-3"
