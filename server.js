@@ -152,8 +152,8 @@ function getPlayerProductionById(room, playerId) {
                 case "cava":
                     resourcesProducted.pietra += 2 + (player.powerUp.OttimizzazioneCave || 0);
                     break;
-                case "giacimento":
-                    resourcesProducted.metallo += 1 + (player.powerUp.OttimizzazioneMiniere || 0);
+                case "miniera":
+                    resourcesProducted.metallo += 2 + (player.powerUp.OttimizzazioneMiniere || 0);
                     break;
             }
             if (map[ter].territory === "SF") resourcesProducted.cibo += 10;
@@ -322,7 +322,7 @@ wss.on('connection', ws => {
                             const now = Date.now();
                             const lastPurchase = room.lastPurchaseTime.get(ws.id) || 0;
 
-                            if (now - lastPurchase < 500) { // Ignora se la richiesta è troppo ravvicinata
+                            if (now - lastPurchase < 50) { // Ignora se la richiesta è troppo ravvicinata
                                 console.log(`[SERVER] Acquisto duplicato da ${ws.id} ignorato.`);
                                 break; // Interrompe l'esecuzione dell'acquisto
                             }
@@ -594,24 +594,25 @@ wss.on('connection', ws => {
                             break;
                         }
                         case 'CONQUER_TERRITORY': {
-                            const { targetTerritoryId } = action.payload;
+                            const { targetTerritoryIds } = action.payload; // Ora riceve un array di ID
                             const attacker = player;
 
-                            // Aggiungi il territorio all'attaccante
-                            attacker.territories.push(targetTerritoryId);
-                            
-                            // Ricalcola i suoi limiti di risorse
-                            attacker.resourcesLimit = calculateResourceLimits(attacker);
-
-                            // Notifica tutti
-                            room.gameState.players.forEach(p => {
-                                sendUpdateToPlayer(p, {
-                                    type: 'info',
-                                    title: `${attacker.name} ha conquistato il territorio neutrale ${targetTerritoryId}!`
+                            if (Array.isArray(targetTerritoryIds)) { // Si assicura che sia un array
+                                targetTerritoryIds.forEach(territoryId => {
+                                    // Aggiunge ogni territorio all'attaccante
+                                    attacker.territories.push(territoryId);
                                 });
-                            });
 
-                            updateRoomGame('gameStateUpdate', roomId);
+                                // Ricalcola i limiti di risorse dell'attaccante dopo aver aggiunto tutti i territori
+                                attacker.resourcesLimit = calculateResourceLimits(attacker);
+
+                                // Notifica tutti i giocatori del cambiamento
+                                room.gameState.players.forEach(p => {
+                                    sendUpdateToPlayer(p, { type: 'info', title: `${attacker.name} ha conquistato i territori neutrali: ${targetTerritoryIds.join(', ')}!` });
+                                });
+
+                                updateRoomGame('gameStateUpdate', roomId);
+                            }
                             break;
                         }
                     }

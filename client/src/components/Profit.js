@@ -18,10 +18,10 @@ function calculateProduction(playerData) {
                     resourcesProducted.legna += 5 + (playerData.powerUp?.OttimizzazioneUliveti || 0);
                     break;
                 case "cava":
-                    resourcesProducted.pietra += 2 + (playerData.powerUp?.OttimizzazioneCave || 0);
+                    resourcesProducted.pietra += 3 + (playerData.powerUp?.OttimizzazioneCave || 0);
                     break;
-                case "giacimento":
-                    resourcesProducted.metallo += 1 + (playerData.powerUp?.OttimizzazioneMiniere || 0);
+                case "miniera":
+                    resourcesProducted.metallo += 2 + (playerData.powerUp?.OttimizzazioneMiniere || 0);
                     break;
             }
             if (map[ter].territory === "SF") resourcesProducted.cibo += 10;

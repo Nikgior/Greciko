@@ -10,6 +10,16 @@ export const purchasableItems = {
             usable: false,
             buildable: false
         },
+        muro:{
+            name: 'Muro',
+            description: 'Protezione per le unità.',
+            cost: { cibo: 0, legna: 5, pietra: 0, metallo: 0, turnisi: 10, pm: 0 },
+            image: "Muro.png",
+            limit: "none",
+            units: 5,
+            usable: false,
+            buildable: true
+        },
         cannone: {
             name: 'Cannone',
             description: 'Efficace contro i muri e le fortezze.',

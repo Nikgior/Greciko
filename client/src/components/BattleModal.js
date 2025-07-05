@@ -5,9 +5,9 @@ import { map } from '../data/mapData.js';
 
 function BattleModal({ show, onHide, onSubmit, gameState }) {
   // Stati principali
-  const [targetTerritoryId, setTargetTerritoryId] = useState('');
+  const [territoryInput, setTerritoryInput] = useState(''); // Input grezzo (es. "1, 2, 3")
   const [isVictory, setIsVictory] = useState(true);
-  const [inputError, setInputError] = useState(''); // Stato per l'errore di input
+  const [inputError, setInputError] = useState('');
 
   // Stati per le perdite e la distruzione
   const [attackerLosses, setAttackerLosses] = useState(0);
@@ -15,13 +15,29 @@ function BattleModal({ show, onHide, onSubmit, gameState }) {
   const [buildingToDestroy, setBuildingToDestroy] = useState('');
 
   // Trova il difensore in base al territorio selezionato
-  const defender = targetTerritoryId ? gameState.allPlayers.find(p => p.territories.includes(targetTerritoryId)) : null;
-  const isNeutralTerritory = targetTerritoryId && !defender;
+  const parsedIds = territoryInput.split(',').map(s => s.trim()).filter(Boolean);
+  const isMultiMode = parsedIds.length > 1;
+
+  // Logica per determinare lo stato del territorio/i
+  let defender = null;
+  let areAllNeutral = false;
+
+  if (parsedIds.length > 0 && !inputError) {
+    if (isMultiMode) {
+      // In modalità multipla, tutti devono essere neutrali
+      areAllNeutral = parsedIds.every(id => !gameState.allPlayers.some(p => p.territories.includes(id)));
+    } else {
+      // In modalità singola, controlla se c'è un difensore
+      const singleId = parsedIds[0];
+      defender = gameState.allPlayers.find(p => p.territories.includes(singleId));
+      areAllNeutral = !defender;
+    }
+  }
 
   // Reset del form quando il modale si chiude
   useEffect(() => {
     if (!show) {
-      setTargetTerritoryId('');
+      setTerritoryInput('');
       setIsVictory(true);
       setAttackerLosses(0);
       setDefenderLosses(0);
@@ -33,33 +49,55 @@ function BattleModal({ show, onHide, onSubmit, gameState }) {
   const handleSubmit = () => {
     if (inputError) return; // Non inviare se c'è un errore
 
-    const actionType = isNeutralTerritory ? 'CONQUER_TERRITORY' : 'PROPOSE_BATTLE';
-    
-    const payload = isNeutralTerritory ? { targetTerritoryId } : {
-      targetTerritoryId,
-      isVictory,
-      defenderName: defender.name,
-      attackerLosses: parseInt(attackerLosses, 10),
-      defenderLosses: parseInt(defenderLosses, 10),
-      buildingToDestroy: buildingToDestroy || null,
-    };
+    const actionType = areAllNeutral ? 'CONQUER_TERRITORY' : 'PROPOSE_BATTLE';
+
+    let payload;
+    if (areAllNeutral) {
+      // Per la conquista, inviamo l'array di ID.
+      payload = { targetTerritoryIds: parsedIds };
+    } else {
+      // Per la battaglia, il payload usa il primo (e unico) ID.
+      payload = {
+        targetTerritoryId: parsedIds[0],
+        isVictory,
+        defenderName: defender.name,
+        attackerLosses: parseInt(attackerLosses, 10),
+        defenderLosses: parseInt(defenderLosses, 10),
+        buildingToDestroy: buildingToDestroy || null,
+      };
+    }
 
     onSubmit(actionType, payload);
     onHide();
   };
 
   // Funzione per validare l'input del territorio
-  const handleTerritoryChange = (value) => {
-    const territoryId = value;
-    setTargetTerritoryId(territoryId);
+  const handleTerritoryInputChange = (value) => {
+    setTerritoryInput(value);
     setInputError(''); // Resetta l'errore ad ogni cambio
 
-    if (!territoryId) return;
+    const ids = value.split(',').map(s => s.trim()).filter(Boolean);
+    if (ids.length === 0) return;
 
-    if (!map[territoryId]) {
-      setInputError('Questo territorio non esiste.');
-    } else if (gameState.player.territories.includes(territoryId)) {
-      setInputError('Non puoi attaccare un tuo territorio.');
+    const errors = [];
+    let hasEnemyTerritoryInMultiMode = false;
+
+    ids.forEach(id => {
+      if (!map[id]) {
+        errors.push(`Territorio ${id} non esiste.`);
+      } else if (gameState.player.territories.includes(id)) {
+        errors.push(`Possiedi già il territorio ${id}.`);
+      } else if (ids.length > 1 && gameState.allPlayers.some(p => p.territories.includes(id))) {
+        hasEnemyTerritoryInMultiMode = true;
+      }
+    });
+
+    if (hasEnemyTerritoryInMultiMode) {
+      errors.push('In modalità multipla puoi conquistare solo territori neutrali.');
+    }
+
+    if (errors.length > 0) {
+      setInputError(errors.join(' '));
     }
   };
 
@@ -67,7 +105,7 @@ function BattleModal({ show, onHide, onSubmit, gameState }) {
     Object.entries(defender.equipment)
       .filter(([key, value]) => value > 0 && purchasableItems.Shop[key]?.buildable) : [];
       
-  const isSubmitDisabled = !targetTerritoryId || !!inputError;
+  const isSubmitDisabled = parsedIds.length === 0 || !!inputError;
 
   return (
     <Modal show={show} onHide={onHide} centered size="lg">
@@ -77,13 +115,12 @@ function BattleModal({ show, onHide, onSubmit, gameState }) {
       <Modal.Body>
         <Form>
           <Form.Group className="mb-3">
-            <Form.Label>Quale territorio vuoi attaccare o conquistare?</Form.Label>
-            {/* CAMPO DI INPUT NUMERICO AL POSTO DEL DROPDOWN */}
+            <Form.Label>Quale/i territorio/i vuoi attaccare o conquistare?</Form.Label>
             <Form.Control
-              type="number"
-              placeholder="Inserisci il numero del territorio"
-              value={targetTerritoryId}
-              onChange={(e) => handleTerritoryChange(e.target.value)}
+              type="text"
+              placeholder="Inserisci ID (es: 23) o più ID separati da virgola (es: 23, 24, 29)"
+              value={territoryInput}
+              onChange={(e) => handleTerritoryInputChange(e.target.value)}
               isInvalid={!!inputError}
             />
             {/* Mostra il messaggio di errore */}
@@ -93,17 +130,17 @@ function BattleModal({ show, onHide, onSubmit, gameState }) {
           </Form.Group>
 
           {/* Se il territorio è neutrale */}
-          {targetTerritoryId && !inputError && isNeutralTerritory && (
+          {parsedIds.length > 0 && !inputError && areAllNeutral && (
             <Alert variant="success">
-              Questo territorio è neutrale. Puoi conquistarlo senza combattere.
+              {isMultiMode ? 'Questi territori sono neutrali.' : 'Questo territorio è neutrale.'} Puoi conquistare senza combattere.
             </Alert>
           )}
 
           {/* Se il territorio è nemico */}
-          {targetTerritoryId && !inputError && defender && (
+          {!isMultiMode && parsedIds.length > 0 && !inputError && defender && (
             <>
               <Alert variant="danger">
-                Stai attaccando il territorio <strong>{targetTerritoryId}</strong>, posseduto da <strong>{defender.name}</strong>.
+                Stai attaccando il territorio <strong>{parsedIds[0]}</strong>, posseduto da <strong>{defender.name}</strong>.
               </Alert>
               <Form.Group className="mb-3">
                 <Form.Check 
@@ -146,7 +183,7 @@ function BattleModal({ show, onHide, onSubmit, gameState }) {
       <Modal.Footer>
         <Button variant="secondary" onClick={onHide}>Annulla</Button>
         <Button variant="primary" onClick={handleSubmit} disabled={isSubmitDisabled}>
-          {isNeutralTerritory ? 'Conquista Territorio' : 'Invia per Conferma'}
+          {areAllNeutral ? 'Conquista Territorio/i' : 'Invia per Conferma'}
         </Button>
       </Modal.Footer>
     </Modal>
