@@ -1,0 +1,20 @@
+.main-content-area {
+  padding-bottom: 300px;
+}
+
+/* Il contenitore che avvolge l'ActionPanel e lo fissa in basso */
+.action-panel-fixed {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  
+  /* Mette il pannello in primo piano */
+  z-index: 1000; 
+
+  /* Stili per renderlo gradevole */
+  background-color: #212529; /* Sfondo scuro per coerenza */
+  padding: 0.5rem 1rem;
+  border-top: 1px solid #495057;
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.3);
+}
