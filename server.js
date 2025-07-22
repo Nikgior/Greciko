@@ -46,8 +46,8 @@ function updatePlayerOnly(type, room, client) {
     const publicGameState = {
         map: room.gameState.map,
         player: playerState,
-        players: playerNames, // Manteniamo la lista dei nomi per compatibilità
-        allPlayers: room.gameState.players, // ++ AGGIUNGIAMO LA LISTA COMPLETA DEI GIOCATORI ++
+        players: playerNames, 
+        allPlayers: room.gameState.players, 
         currentTurn: room.gameState.currentTurn,
         turnNumber: room.gameState.turnNumber,
     };
@@ -76,9 +76,6 @@ function createInitialGameState(playersInfo) {
         return null;
     }
 
-    // --- PRIMO PASSO: Creiamo l'array dei giocatori ---
-    // Questa parte crea ogni giocatore con le sue informazioni base.
-    // Nota che 'resourcesLimit' viene lasciato come un oggetto vuoto per ora.
     const players = playersInfo.map(playerInfo => {
         const roccaforteKey = Object.keys(map.Roccaforti).find(k => k.toLowerCase() === playerInfo.roccaforte.toLowerCase());
         const territories = map.Roccaforti[roccaforteKey];
@@ -87,9 +84,10 @@ function createInitialGameState(playersInfo) {
             id: playerInfo.id,
             name: playerInfo.username,
             roccaforte: playerInfo.roccaforte,
+            isConnected: true, // <-- MODIFICA 1: Aggiunto stato di connessione
             territories: territories,
-            resources: { cibo: 2000, legna: 2000, pietra: 2000, metallo: 2000, turnisi: 2000, pm: 7 },
-            resourcesLimit: {}, // <--- Lasciato volutamente vuoto!
+            resources: { cibo: 50, legna: 15, pietra: 10, metallo: 5, turnisi: 60, pm: 7 },
+            resourcesLimit: {},
             equipment:{
                 armata: 15, muro: 0, cannone: 0, nave: 0, cartaBonus: 0,
                 laboratorioTecnologia: 0,
@@ -114,17 +112,13 @@ function createInitialGameState(playersInfo) {
         };
     });
 
-    // --- SECONDO PASSO: Calcoliamo i limiti per ogni giocatore ---
-    // Ora che tutti i giocatori esistono, scorriamo la lista.
-    // Per ognuno, calcoliamo il suo limite di risorse e lo inseriamo.
     players.forEach(player => {
-        player.resourcesLimit = calculateResourceLimits(player); // <-- Qui popoliamo il campo vuoto
+        player.resourcesLimit = calculateResourceLimits(player);
     });
 
-    // --- TERZO PASSO: Restituiamo lo stato di gioco completo ---
     return {
         map: map,
-        players: players, // Ora i giocatori hanno i limiti corretti
+        players: players,
         currentTurn: players[0].name,
         turnIndex: 0,
         turnNumber: 1,
@@ -142,7 +136,6 @@ function getPlayerProductionById(room, playerId) {
         return resourcesProducted;
     }
 
-    // Applica bonus produzione da ricerche (Regole 5, 6, 7)
     player.territories.forEach(ter => {
         if (map[ter]) {
             switch (map[ter].type) {
@@ -161,12 +154,10 @@ function getPlayerProductionById(room, playerId) {
         resourcesProducted.turnisi += 5;
     });
 
-    // Applica bonus da Emporio Maggiore (Regola 2)
     if (player.equipment.emporioMaggior > 0) {
-        resourcesProducted.turnisi += 100 * player.equipment.emporioMaggior; // Bonus per ogni emporio
+        resourcesProducted.turnisi += 100 * player.equipment.emporioMaggior;
     }
 
-    // Calcola consumo cibo armate
     if (player.equipment && typeof player.equipment.armata !== 'undefined') {
         resourcesProducted.cibo -= player.equipment.armata;
     }
@@ -182,13 +173,11 @@ function calculateResourceLimits(player){
     let limit = {cibo: 0, legna: 0, pietra: 0, metallo: 0};
     const territoryCount = player.territories.length;
 
-    // Calcolo base
     limit.cibo = territoryCount * map.ResourcesForTerritory.cibo;
     limit.pietra = territoryCount * map.ResourcesForTerritory.pietra;
     limit.legna = territoryCount * map.ResourcesForTerritory.legna;
     limit.metallo = territoryCount * map.ResourcesForTerritory.metallo;
 
-    // Applica bonus edifici (Regole 3 e 4)
     if (player.equipment.grandeGranaio > 0) {
         limit.cibo *= (2**player.equipment.grandeGranaio);
     }
@@ -214,11 +203,9 @@ wss.on('connection', ws => {
 
         switch (type) {
             case 'createRoom': {
-                // FIX: Controlla che il payload esista prima di destrutturarlo.
                 if (!payload) {
-                    console.error('[Server] Messaggio "createRoom" ricevuto senza payload.');
                     ws.send(JSON.stringify({ type: 'error', payload: { message: 'Dati del giocatore mancanti per la creazione della stanza.' } }));
-                    return; // Interrompe l'esecuzione per questo messaggio
+                    return;
                 }
                 const { username, roccaforte } = payload;
                 if (!username || !roccaforte) {
@@ -253,7 +240,6 @@ wss.on('connection', ws => {
                 break;
             }
 
-            // ... il resto del server.js rimane invariato ...
             case 'joinRoom': {
                 const { roomId, username, roccaforte } = payload;
                 const room = gameRooms.get(roomId);
@@ -294,6 +280,29 @@ wss.on('connection', ws => {
                 });
                 break;
             }
+
+            // <-- MODIFICA 2: Aggiunto nuovo case per gestire la riconnessione -->
+            case 'reconnect': {
+                const { roomId, playerId } = payload;
+                const room = gameRooms.get(roomId);
+                if (room?.gameState) {
+                    const player = getPlayerById(room, playerId);
+                    if (player && !player.isConnected) {
+                        // Associa il vecchio ID giocatore alla nuova connessione ws
+                        ws.id = playerId;
+                        player.isConnected = true;
+                        room.clients.add(ws);
+                        clientConnections.set(ws, playerId); // Aggiorna l'associazione
+                        console.log(`[Server] Giocatore ${player.name} (${playerId}) si è riconnesso.`);
+                        updateRoomGame('gameStateUpdate', roomId);
+                    } else {
+                        ws.send(JSON.stringify({ type: 'error', payload: { message: 'Impossibile riconnettersi.' } }));
+                    }
+                } else {
+                    ws.send(JSON.stringify({ type: 'error', payload: { message: 'Stanza non trovata per la riconnessione.' } }));
+                }
+                break;
+            }
             
             case 'startGame': {
                 const { roomId } = payload;
@@ -317,54 +326,44 @@ wss.on('connection', ws => {
                     switch(action.type){
                         
                         case 'PURCHASE_ITEM': {
-                            // --- BLOCCO ANTI-DOPPIO CLICK ---
-                            // Controlla se è passato almeno mezzo secondo dall'ultimo acquisto.
                             const now = Date.now();
                             const lastPurchase = room.lastPurchaseTime.get(ws.id) || 0;
 
-                            if (now - lastPurchase < 50) { // Ignora se la richiesta è troppo ravvicinata
+                            if (now - lastPurchase < 50) { 
                                 console.log(`[SERVER] Acquisto duplicato da ${ws.id} ignorato.`);
-                                break; // Interrompe l'esecuzione dell'acquisto
+                                break;
                             }
-                            room.lastPurchaseTime.set(ws.id, now); // Registra l'ora di questo acquisto
-                            // --- FINE BLOCCO ---
+                            room.lastPurchaseTime.set(ws.id, now);
 
                             const itemKey = action.payload.itemId;
                             const purchasedItem = purchasable.Shop[itemKey];
                             const player = room.gameState.players.find(p => p.id === ws.id);
 
-                            // Verifica che l'oggetto esista
                             if (!purchasedItem) {
                                 console.error(`Tentativo di acquisto di un oggetto inesistente: ${itemKey}`);
                                 break;
                             }
                             
-                            // Verifica che il giocatore non abbia superato il limite per quell'oggetto
                             if (player.equipment[itemKey] >= purchasedItem.limit) {
                                 console.log(`[SERVER] ${player.name} ha già raggiunto il limite per ${itemKey}.`);
                                 break;
                             }
 
-                            // Sottrae il costo delle risorse al giocatore
                             player.resources = gA.sumPlayerResources(purchasedItem.cost, ws.id, false);
 
-                            // Aggiunge l'oggetto all'equipaggiamento del giocatore
                             if (purchasedItem.units) {
                                 player.equipment[itemKey] += purchasedItem.units;
                             } else {
                                 player.equipment[itemKey] += 1;
                             }
 
-                            // Ricalcola i limiti delle risorse se l'edificio acquistato li influenza
                             if (itemKey === 'grandeGranaio' || itemKey === 'deposito') {
                                 player.resourcesLimit = calculateResourceLimits(player);
                             }
-
-                            // Notifica tutti i giocatori dell'aggiornamento dello stato di gioco
                             updateRoomGame('gameStateUpdate', roomId);
                             break;
                         }
-                        case 'RESEARCH_POWERUP':
+                        case 'RESEARCH_POWERUP': {
                             const PowerUpKey = action.payload.powerUpId;
                             const purchasedPowerUp = purchasable.Research[PowerUpKey];
                             if(!purchasedPowerUp){
@@ -375,27 +374,42 @@ wss.on('connection', ws => {
                             room.gameState.players.find(p => p.id === ws.id).powerUp[PowerUpKey] += 1;
                             updateRoomGame('gameStateUpdate',roomId); 
                             break;
+                        }
+                        // <-- MODIFICA 3: Logica di END_TURN che salta i giocatori disconnessi -->
                         case 'END_TURN': {
                             const currentPlayer = room.gameState.players[room.gameState.turnIndex];
                             if (currentPlayer.id !== ws.id) {
                                 break; 
                             }
 
-                            const nextTurnIndex = (room.gameState.turnIndex + 1) % room.gameState.players.length;
-                            const nextPlayer = room.gameState.players[nextTurnIndex];
+                            let nextTurnIndex = room.gameState.turnIndex;
+                            let nextPlayer = null;
+                            const totalPlayers = room.gameState.players.length;
 
+                            // Cerca il prossimo giocatore CONNESSO
+                            for (let i = 1; i <= totalPlayers; i++) {
+                                const testIndex = (room.gameState.turnIndex + i) % totalPlayers;
+                                if (room.gameState.players[testIndex].isConnected) {
+                                    nextPlayer = room.gameState.players[testIndex];
+                                    nextTurnIndex = testIndex;
+                                    break;
+                                }
+                            }
+
+                            if (!nextPlayer) {
+                                console.log(`[Stanza: ${roomId}] Nessun altro giocatore connesso. Il turno non avanza.`);
+                                break;
+                            }
+
+                            if (nextTurnIndex <= room.gameState.turnIndex) {
+                                room.gameState.turnNumber += 1;
+                            }
                             room.gameState.turnIndex = nextTurnIndex;
                             room.gameState.currentTurn = nextPlayer.name;
 
-                            if (nextTurnIndex === 0) {
-                                room.gameState.turnNumber += 1;
-                            }
-
-                            // Assegna produzione
                             const productionForNextPlayer = getPlayerProductionById(room, nextPlayer.id);
                             gA.sumPlayerResources(productionForNextPlayer, nextPlayer.id, true);
 
-                            // Assegna Punti Mossa bonus (Regola 8)
                             let basePm = 7;
                             const pmLevel = nextPlayer.powerUp.StrategiaMigliorata || 0;
                             if (pmLevel === 1) basePm = 9;
@@ -403,7 +417,6 @@ wss.on('connection', ws => {
                             else if (pmLevel >= 3) basePm = 13;
                             nextPlayer.resources.pm = basePm;
 
-                            // Assegna armate extra da Fabbrica Armi Pesanti (Regola 1)
                             if (nextPlayer.equipment.fabbricaArmiPesanti > 0) {
                                 nextPlayer.equipment.armata += 5 * nextPlayer.equipment.fabbricaArmiPesanti;
                             }
@@ -411,7 +424,7 @@ wss.on('connection', ws => {
                             updateRoomGame('gameStateUpdate', roomId);
                             break;
                         }
-                        case 'USE_ITEM':
+                        case 'USE_ITEM': {
                             const itemId = action.payload.itemId;
                             if(player.equipment[itemId]>0) player.equipment[itemId] -= 1;
                             room.gameState.players.forEach(p =>{
@@ -423,16 +436,16 @@ wss.on('connection', ws => {
                             });
                             updateRoomGame('gameStateUpdate',roomId); 
                             break;
-                        case 'SUBMIT_TRADE_OFFER':
+                        }
+                        case 'SUBMIT_TRADE_OFFER': {
                             const tradeOffer = action.payload.tradeOffer;
-                            const targetPlayerId = room.gameState.players.find(p => p.name === tradeOffer.targetPlayerName).id;
-                            const targetPlayer = room.gameState.players.find(p => p.id === targetPlayerId);
+                            const targetPlayer = room.gameState.players.find(p => p.name === tradeOffer.targetPlayerName);
+                            if (!targetPlayer) break;
 
                             if(player.resources.cibo < tradeOffer.cibo 
                                 || player.resources.legna < tradeOffer.legna 
                                 || player.resources.pietra < tradeOffer.pietra 
                                 || player.resources.metallo < tradeOffer.metallo) break;
-
                             
                             tradeOffer.senderUpdateIndex = player.updates.length;
                             tradeOffer.targetUpdateIndex = targetPlayer.updates.length;   
@@ -453,19 +466,19 @@ wss.on('connection', ws => {
                                 "image": tradeOffer.image,
                                 "title": `hai inviato una richiesta di scambio al giocatore ${targetPlayer.name}`,
                             });
-                            updatePlayerOnly('gameStateUpdate', room, getClientById(targetPlayerId));
+                            updatePlayerOnly('gameStateUpdate', room, getClientById(targetPlayer.id));
                             break;
-                        case 'ANSWER_TRADE_OFFER':
-                            
+                        }
+                        case 'ANSWER_TRADE_OFFER': {
                             if(action.payload.answer){
                                 const targetTradeIndex = action.payload.targetTradeIndex;
                                 const senderTradeIndex = action.payload.senderTradeIndex;
                                 const tradeOffer = player.tradeOffers[targetTradeIndex];
+                                if (!tradeOffer) break;
 
-                                const senderUpdateIndex = tradeOffer.senderUpdateIndex;
-                                const targetUpdateIndex = tradeOffer.targetUpdateIndex;
                                 const targetPlayer = room.gameState.players.find(p => p.name === tradeOffer.targetPlayerName);
                                 const senderPlayer = room.gameState.players.find(p => p.name === tradeOffer.senderPlayerName);
+                                if (!targetPlayer || !senderPlayer) break;
                                 
                                 gA.sumPlayerResources(tradeOffer.receiveItems, targetPlayer.id, false);
                                 gA.sumPlayerResources(tradeOffer.giveItems, senderPlayer.id, false);
@@ -475,8 +488,8 @@ wss.on('connection', ws => {
 
                                 if(targetPlayer.tradeOffers[targetTradeIndex])targetPlayer.tradeOffers.splice(targetTradeIndex, 1);
                                 if(senderPlayer.tradeOffers[senderTradeIndex])senderPlayer.tradeOffers.splice(senderTradeIndex, 1);
-                                if(targetPlayer.updates[targetUpdateIndex])targetPlayer.updates.splice(targetUpdateIndex, 1);
-                                if(senderPlayer.updates[targetUpdateIndex])senderPlayer.updates.splice(senderTradeIndex, 1);
+                                if(targetPlayer.updates[tradeOffer.targetUpdateIndex])targetPlayer.updates.splice(tradeOffer.targetUpdateIndex, 1);
+                                if(senderPlayer.updates[tradeOffer.senderUpdateIndex])senderPlayer.updates.splice(tradeOffer.senderUpdateIndex, 1);
                                 
                                 updatePlayerOnly('gameStateUpdate', room, getClientById(targetPlayer.id));
                                 updatePlayerOnly('gameStateUpdate', room, getClientById(senderPlayer.id));
@@ -485,32 +498,29 @@ wss.on('connection', ws => {
                                 const targetTradeIndex = action.payload.targetTradeIndex;
                                 const senderTradeIndex = action.payload.senderTradeIndex;
                                 const tradeOffer = player.tradeOffers[targetTradeIndex];
+                                if (!tradeOffer) break;
 
-                                const senderUpdateIndex = tradeOffer.senderUpdateIndex;
-                                const targetUpdateIndex = tradeOffer.targetUpdateIndex;
                                 const targetPlayer = room.gameState.players.find(p => p.name === tradeOffer.targetPlayerName);
                                 const senderPlayer = room.gameState.players.find(p => p.name === tradeOffer.senderPlayerName);
+                                if (!targetPlayer || !senderPlayer) break;
 
                                 if(targetPlayer.tradeOffers[targetTradeIndex])targetPlayer.tradeOffers.splice(targetTradeIndex, 1);
                                 if(senderPlayer.tradeOffers[senderTradeIndex])senderPlayer.tradeOffers.splice(senderTradeIndex, 1);
-                                if(targetPlayer.updates[targetUpdateIndex])targetPlayer.updates.splice(targetUpdateIndex, 1);
-                                if(senderPlayer.updates[targetUpdateIndex])senderPlayer.updates.splice(targetUpdateIndex, 1);
+                                if(targetPlayer.updates[tradeOffer.targetUpdateIndex])targetPlayer.updates.splice(tradeOffer.targetUpdateIndex, 1);
+                                if(senderPlayer.updates[tradeOffer.senderUpdateIndex])senderPlayer.updates.splice(tradeOffer.senderUpdateIndex, 1);
 
                                 sendUpdateToPlayer(targetPlayer, {
-                                    "type": "gameStateUpdate",
-                                    "image": tradeOffer.image,
-                                    "title": `hai rifiutato la richiesta del giocatore ${senderPlayer.name}`,
+                                    "type": "gameStateUpdate", "image": tradeOffer.image, "title": `hai rifiutato la richiesta del giocatore ${senderPlayer.name}`,
                                 });
                                 sendUpdateToPlayer(senderPlayer, {
-                                    "type": "gameStateUpdate",
-                                    "image": tradeOffer.image,
-                                    "title": `il giocatore ${targetPlayer.name} ha rifiutato la tua richiesta di scambio`,
+                                    "type": "gameStateUpdate", "image": tradeOffer.image, "title": `il giocatore ${targetPlayer.name} ha rifiutato la tua richiesta di scambio`,
                                 })
 
                                 updatePlayerOnly('gameStateUpdate', room, getClientById(targetPlayer.id));
                                 updatePlayerOnly('gameStateUpdate', room, getClientById(senderPlayer.id));
                             }
                             break;
+                        }
                         case 'PROPOSE_BATTLE': {
                             const { targetTerritoryId, isVictory, defenderName, attackerLosses, defenderLosses, buildingToDestroy } = action.payload;
                             const attacker = player;
@@ -523,10 +533,8 @@ wss.on('connection', ws => {
                                 type: 'battleConfirmation',
                                 battleId,
                                 attackerName: attacker.name,
-                                targetTerritoryId,
-                                isVictory,
-                                attackerLosses,
-                                defenderLosses,
+                                targetTerritoryId, isVictory,
+                                attackerLosses, defenderLosses,
                                 buildingToDestroy,
                                 title: `${attacker.name} ha attaccato il tuo territorio ${targetTerritoryId}.`
                             };
@@ -542,7 +550,7 @@ wss.on('connection', ws => {
                             break;
                         }
                         case 'CONFIRM_BATTLE': {
-                            const defender = player; // Chi conferma è il difensore
+                            const defender = player;
                             const { battleId, attackerName, accepted } = action.payload;
                             
                             const updateIndex = defender.updates.findIndex(up => up.battleId === battleId);
@@ -555,27 +563,22 @@ wss.on('connection', ws => {
                             if (!attacker) break;
 
                             if (accepted) {
-                                // Applica perdite armate
                                 attacker.equipment.armata -= battleUpdate.attackerLosses;
                                 defender.equipment.armata -= battleUpdate.defenderLosses;
 
                                 let destructionMessage = '';
                                 let conquestMessage = '';
 
-                                // Distruggi edificio
                                 if (battleUpdate.buildingToDestroy && defender.equipment[battleUpdate.buildingToDestroy] > 0) {
                                     defender.equipment[battleUpdate.buildingToDestroy] -= 1;
                                     const buildingName = purchasable.Shop[battleUpdate.buildingToDestroy]?.name || 'edificio';
                                     destructionMessage = ` Un ${buildingName} è stato distrutto!`;
                                 }
 
-                                // Trasferisci territorio in caso di vittoria
                                 if (battleUpdate.isVictory) {
                                     defender.territories = defender.territories.filter(t => t !== battleUpdate.targetTerritoryId);
                                     attacker.territories.push(battleUpdate.targetTerritoryId);
                                     conquestMessage = ` ${attacker.name} ha conquistato il territorio ${battleUpdate.targetTerritoryId}!`;
-
-                                    // Ricalcola i limiti per entrambi i giocatori! FONDAMENTALE.
                                     attacker.resourcesLimit = calculateResourceLimits(attacker);
                                     defender.resourcesLimit = calculateResourceLimits(defender);
                                 }
@@ -585,7 +588,6 @@ wss.on('connection', ws => {
                                 sendUpdateToPlayer(defender, { type: 'info', title: resultTitle });
 
                             } else {
-                                // Battaglia rifiutata
                                 sendUpdateToPlayer(attacker, { type: 'info', title: `${defender.name} ha rifiutato l'esito della battaglia.` });
                                 sendUpdateToPlayer(defender, { type: 'info', title: `Hai rifiutato l'esito della battaglia.` });
                             }
@@ -594,19 +596,16 @@ wss.on('connection', ws => {
                             break;
                         }
                         case 'CONQUER_TERRITORY': {
-                            const { targetTerritoryIds } = action.payload; // Ora riceve un array di ID
+                            const { targetTerritoryIds } = action.payload;
                             const attacker = player;
 
-                            if (Array.isArray(targetTerritoryIds)) { // Si assicura che sia un array
+                            if (Array.isArray(targetTerritoryIds)) {
                                 targetTerritoryIds.forEach(territoryId => {
-                                    // Aggiunge ogni territorio all'attaccante
                                     attacker.territories.push(territoryId);
                                 });
 
-                                // Ricalcola i limiti di risorse dell'attaccante dopo aver aggiunto tutti i territori
                                 attacker.resourcesLimit = calculateResourceLimits(attacker);
 
-                                // Notifica tutti i giocatori del cambiamento
                                 room.gameState.players.forEach(p => {
                                     sendUpdateToPlayer(p, { type: 'info', title: `${attacker.name} ha conquistato i territori neutrali: ${targetTerritoryIds.join(', ')}!` });
                                 });
@@ -622,43 +621,30 @@ wss.on('connection', ws => {
         }
     });
 
+    // <-- MODIFICA 4: Logica di disconnessione che non elimina il giocatore -->
     ws.on('close', () => {
-        const playerId = clientConnections.get(ws);
-        console.log(`[Server] Client disconnesso con ID: ${ws.id}`);
-        let roomIdToDelete = null;
+        console.log(`[Server] Client ${ws.id} si è disconnesso.`);
+        
+        // Cerca in tutte le stanze il giocatore corrispondente all'ID della connessione chiusa
         for (const [roomId, room] of gameRooms.entries()) {
-            const playerInRoom = room.players.find(p => p.id === ws.id);
-            if (playerInRoom) {
-                room.clients.delete(ws);
-                room.players = room.players.filter(p => p.id !== ws.id);
-                
-                if (room.clients.size === 0) {
-                    roomIdToDelete = roomId;
-                } else {
-                    if (!room.gameState) {
-                         broadcastToRoom(roomId, {
-                            type: 'playerLeft',
-                            payload: { players: room.players }
-                        });
-                    }
-                    if (room.hostId === ws.id) {
-                        const newHost = Array.from(room.clients)[0];
-                        if (newHost) {
-                            room.hostId = newHost.id;
-                            const newHostPlayer = room.players.find(p => p.id === newHost.id);
-                            if(newHostPlayer) newHostPlayer.isHost = true;
-                            console.log(`[Server] Nuovo host eletto per la stanza ${roomId}: ${newHost.id}`);
-                            broadcastToRoom(roomId, { type: 'newHost', payload: { hostId: newHost.id, players: room.players } });
-                        }
-                    }
+            // Controlla solo se la partita è iniziata (esiste gameState)
+            if (room.gameState) {
+                const player = room.gameState.players.find(p => p.id === ws.id);
+
+                if (player) {
+                    // Trovato! Segna come disconnesso e aggiorna tutti.
+                    player.isConnected = false;
+                    room.clients.delete(ws);
+                    console.log(`[Server] Giocatore '${player.name}' segnato come disconnesso nella stanza ${roomId}.`);
+                    
+                    // Invia un aggiornamento completo a tutti i client rimasti nella stanza
+                    // così vedono lo stato "Disconnesso"
+                    updateRoomGame('gameStateUpdate', roomId);
+                    
+                    // Usciamo dal loop perché abbiamo trovato e gestito il giocatore
+                    return; 
                 }
-                break;
             }
         }
-        if (roomIdToDelete) {
-            gameRooms.delete(roomIdToDelete);
-            console.log(`[Server] Stanza ${roomIdToDelete} eliminata.`);
-        }
-        clientConnections.delete(ws);
     });
 });

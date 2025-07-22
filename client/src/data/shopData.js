@@ -5,7 +5,7 @@ export const purchasableItems = {
             description: 'Unità di combattimento base.',
             cost: { cibo: 15, legna: 5, pietra: 0, metallo: 1, turnisi: 15, pm: 0 },
             image: "Armata.png",
-            units: 6,
+            units: 5,
             limit: "none",
             usable: false,
             buildable: false

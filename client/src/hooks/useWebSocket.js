@@ -1,7 +1,8 @@
+// In useWebSocket.js
+
 import { useState, useEffect, useRef, useCallback } from 'react';
 
 export default function useGrecikoGame(url) {
-  // --- STATO DELL'APPLICAZIONE ---
   const [appState, setAppState] = useState({ 
     view: 'lobby',
     roomId: null,
@@ -12,9 +13,17 @@ export default function useGrecikoGame(url) {
     connectionStatus: 'CONNECTING'
   });
 
-  // --- GESTIONE WEBSOCKET ---
   const ws = useRef(null);
-  const connectionEstablished = useRef(false);
+
+  const sendMessage = useCallback((type, payload) => {
+    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+      const message = { type, payload };
+      console.log('⬆️ Messaggio inviato:', message);
+      ws.current.send(JSON.stringify(message));
+    } else {
+      console.error('La connessione WebSocket non è aperta.');
+    }
+  }, []);
 
   useEffect(() => {
     const socket = new WebSocket(url);
@@ -22,24 +31,21 @@ export default function useGrecikoGame(url) {
 
     socket.onopen = () => {
       console.log('✅ Connesso al server WebSocket');
-      connectionEstablished.current = true;
       setAppState(s => ({ ...s, connectionStatus: 'OPEN' }));
+
+      // --- LOGICA DI RICONNESSIONE ---
+      const savedRoomId = localStorage.getItem('grecikoRoomId');
+      const savedPlayerId = localStorage.getItem('grecikoPlayerId');
+
+      if (savedRoomId && savedPlayerId) {
+        console.log(`Trovata sessione precedente. Tento la riconnessione... Room: ${savedRoomId}, Player: ${savedPlayerId}`);
+        sendMessage('reconnect', { roomId: savedRoomId, playerId: savedPlayerId });
+      }
     };
 
     socket.onclose = () => {
       console.log('❌ Disconnesso dal server WebSocket');
-      if (connectionEstablished.current) {
-        setAppState({
-            view: 'lobby',
-            roomId: null,
-            players: [],
-            gameState: null,
-            playerId: null,
-            isHost: false,
-            connectionStatus: 'CLOSED'
-        });
-      }
-      connectionEstablished.current = false;
+      setAppState(s => ({ ...s, connectionStatus: 'CLOSED' }));
     };
 
     socket.onerror = (error) => {
@@ -56,6 +62,8 @@ export default function useGrecikoGame(url) {
         switch (type) {
           case 'roomCreated':
           case 'joinedRoom':
+            localStorage.setItem('grecikoRoomId', payload.roomId);
+            localStorage.setItem('grecikoPlayerId', payload.playerId);
             setAppState(s => ({ 
               ...s, 
               view: 'waitingRoom', 
@@ -76,16 +84,23 @@ export default function useGrecikoGame(url) {
             break;
           case 'gameStarted':
           case 'gameStateUpdate':
+            // Se riceviamo uno stato di gioco, assicuriamoci di essere nella vista corretta
             setAppState(s => ({
               ...s,
               view: 'game',
-              gameState: gameState
+              gameState: gameState,
+              // Aggiorna anche l'ID della stanza e del giocatore in caso di riconnessione
+              roomId: s.roomId || localStorage.getItem('grecikoRoomId'),
+              playerId: s.playerId || localStorage.getItem('grecikoPlayerId'),
             }));
             break;
           case 'error':
             alert(`Errore dal server: ${payload.message}`);
-            if (payload.message.includes('Stanza non trovata')) {
-              setAppState(s => ({...s, view: 'lobby'}));
+            // Se l'errore indica che la riconnessione è fallita, pulisci la sessione e torna alla lobby
+            if (payload.message.includes('Stanza non trovata') || payload.message.includes('Impossibile riconnettersi')) {
+              localStorage.removeItem('grecikoRoomId');
+              localStorage.removeItem('grecikoPlayerId');
+              setAppState(s => ({...s, view: 'lobby', roomId: null, playerId: null, gameState: null}));
             }
             break;
           default:
@@ -99,18 +114,7 @@ export default function useGrecikoGame(url) {
     return () => {
       socket.close();
     };
-  }, [url]);
-
-  // --- FUNZIONI DI AZIONE ---
-  const sendMessage = useCallback((type, payload) => {
-    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-      const message = { type, payload };
-      console.log('⬆️ Messaggio inviato:', message);
-      ws.current.send(JSON.stringify(message));
-    } else {
-      console.error('La connessione WebSocket non è aperta.');
-    }
-  }, []);
+  }, [url, sendMessage]);
 
   const createRoom = useCallback((username, roccaforte) => {
     sendMessage('createRoom', { username, roccaforte });
@@ -125,12 +129,10 @@ export default function useGrecikoGame(url) {
     sendMessage('startGame', { roomId: appState.roomId });
   }, [sendMessage, appState.roomId]);
 
-  // --- CORREZIONE PRINCIPALE QUI ---
-  // Ora accetta un singolo oggetto 'action' e lo inoltra correttamente.
   const sendGameAction = useCallback(action => {
     sendMessage('gameAction', { 
       roomId: appState.roomId,
-      action: action // Invia l'intero oggetto {type, payload}
+      action: action
     });
   }, [sendMessage, appState.roomId]);
 

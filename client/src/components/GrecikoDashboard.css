@@ -2,7 +2,7 @@
   padding-bottom: 300px;
 }
 .item-purchased-highlight {
-  animation: purchase-flash 0.25s ease-out;
+  animation: purchase-flash 0.2s ease-out;
 }
 /* Il contenitore che avvolge l'ActionPanel e lo fissa in basso */
 .action-panel-fixed {

@@ -78,6 +78,7 @@ function GrecikoDashboard({ player, gameState, onGameAction }) {
   const handleDashboardClick = () => {
     setActivePanel('none');
   };
+  
 
   return (
     <div className="greciko-dashboard-layout">

@@ -108,11 +108,14 @@ const WaitingRoom = ({ roomId, players, isHost, onStart }) => (
         <p className="lead">Sei nella stanza: <strong className="text-monospace p-2 rounded bg-light">{roomId}</strong></p>
         <p>Condividi questo codice con i tuoi amici per farli unire.</p>
         <hr />
-        <h3>Giocatori Connessi: {players.length} / 6</h3>
+        <h3>Giocatori Connessi: {players.filter(p => p.isConnected).length} / {players.length}</h3>
         <ul className="list-group col-6 mx-auto my-4">
             {players.map(player => (
-                <li key={player.id} className="list-group-item d-flex justify-content-between align-items-center">
-                    {player.username} {player.isHost && '(Host)'}
+                <li key={player.id} className={`list-group-item d-flex justify-content-between align-items-center ${!player.isConnected ? 'text-muted fst-italic' : ''}`}>
+                    <span>
+                        {player.username} {player.isHost && '(Host)'}
+                        {!player.isConnected && ' (Disconnesso)'}
+                    </span>
                     <span className="badge bg-info rounded-pill">{player.roccaforte}</span>
                 </li>
             ))}
@@ -121,7 +124,7 @@ const WaitingRoom = ({ roomId, players, isHost, onStart }) => (
             <button
                 onClick={onStart}
                 className="btn btn-success btn-lg mt-4"
-                disabled={players.length < 1}
+                disabled={players.length < 1} // O puoi mettere una logica più stringente, es. players.filter(p => p.isConnected).length < 2
             >
                 Avvia Partita
             </button>
@@ -129,59 +132,69 @@ const WaitingRoom = ({ roomId, players, isHost, onStart }) => (
     </div>
 );
 
+
+
 // --- Componente App Principale ---
 
 function App() {
+    // La logica per l'host dinamico è ottima, la manteniamo
+    const host = window.location.hostname === 'localhost' ? 'localhost' : '79.60.113.115';
     const { appState,
             createRoom,
             joinRoom,
             startGame,
-            sendGameAction } = useGrecikoGame('ws://localhost:8080'); //use 79.60.113.115
+            sendGameAction } = useGrecikoGame(`ws://${host}:8080`);
 
     const availableRoccaforti = ROCCAFORTI.filter(r =>
         !appState.players?.some(p => p.roccaforte === r)
     );
 
+    // Gestione degli stati di connessione
     if (appState.connectionStatus !== 'OPEN') {
+        if (appState.connectionStatus === 'CLOSED' && appState.roomId) {
+            return <div className="text-center p-5">Connessione persa. Ricarica la pagina per tentare di riconnetterti...</div>;
+        }
         return <div className="text-center p-5">Connessione al server in corso...</div>;
     }
 
-    if (appState.view === 'lobby') {
-        return <Lobby
-            onCreate={createRoom}
-            onJoin={joinRoom}
-            availableRoccaforti={availableRoccaforti}
-        />;
-    }
-
-    if (appState.view === 'waitingRoom') {
-        return (
-            <WaitingRoom
+    // Viste principali dell'applicazione
+    switch (appState.view) {
+        case 'lobby':
+            return <Lobby
+                onCreate={createRoom}
+                onJoin={joinRoom}
+                availableRoccaforti={availableRoccaforti}
+            />;
+        
+        case 'waitingRoom':
+            return <WaitingRoom
                 roomId={appState.roomId}
                 players={appState.players || []}
                 isHost={appState.isHost}
                 onStart={startGame}
-            />
-        );
+            />;
+
+        case 'game':
+            if (appState.gameState && appState.gameState.allPlayers) {
+                // Questa logica è corretta e robusta per trovare il giocatore
+                const me = appState.gameState.allPlayers.find(p => p.id === appState.playerId);
+                
+                if (me) {
+                    return (
+                        <GrecikoDashboard
+                            player={me}
+                            gameState={appState.gameState}
+                            onGameAction={sendGameAction}
+                        />
+                    );
+                }
+            }
+            // Se gameState o il giocatore non sono ancora pronti, mostra un caricamento
+            return <div className="text-center p-5">Sincronizzazione della partita in corso...</div>;
+            
+        default:
+            return <div>Caricamento...</div>;
     }
-
-    if (appState.view === 'game' && appState.gameState) {
-        const me = appState.gameState.player;
-        if (!me) {
-            console.warn("Giocatore corrente non trovato nello stato del gioco. Tornando alla lobby.");
-            return <div>Errore: Dati giocatore non disponibili.</div>;
-        }
-
-        return (
-            <GrecikoDashboard
-                player={me}
-                gameState={appState.gameState}
-                onGameAction={sendGameAction}
-            />
-        );
-    }
-
-    return <div>Caricamento...</div>;
 }
 
 export default App;
